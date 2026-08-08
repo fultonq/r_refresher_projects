@@ -206,9 +206,9 @@ forecast_comparison_plot <- ggplot(full_plot_df, aes(x = Date, y = Value, color 
   geom_ribbon(data = subset(full_plot_df, Series != "Actual"),
               aes(ymin = Lower, ymax = Upper, fill = Series), alpha = 0.15, color = NA) +
   geom_line(linewidth = 0.9) +
-  geom_vline(xintercept = as.numeric(test_dates[1]), linetype = "dashed", color = "gray50") +
+  geom_vline(xintercept = test_dates[1], linetype = "dashed", color = "gray50") +
   scale_color_manual(values = series_colors) +
-  scale_fill_manual(values = series_colors) +
+  scale_fill_manual(values = series_colors, guide = "none") +
   labs(title = "12-Month Holdout Forecast: Holt-Winters vs ARIMA (95% PI)",
        subtitle = "Dashed line marks the train/test split -- both methods forecast blind past this point",
        x = NULL, y = "Demand", color = "Series", fill = "Series") +

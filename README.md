@@ -6,7 +6,7 @@ through applied statistical analysis, each paired with an equivalent
 or `source()`, and only depend on `ggplot2` plus base R (`MASS` is used,
 but ships bundled with any standard R install).
 
-## R Refresher series (Parts 1–5)
+## R Refresher series (Parts 1–6)
 
 Numbered sections continue across files (Part 1–2 ends at Section 27,
 Part 3 picks up at 28, etc.) — read them in this order:
@@ -17,6 +17,7 @@ Part 3 picks up at 28, etc.) — read them in this order:
 | `r_chart_selection_guide.R` | 28–35 | Part 3: chart-selection decision framework — which plot fits which data (bar vs. pie, histogram/density/boxplot, scatter + 2D binning, grouped/stacked bar, mosaic plot, line chart, pairs plot + correlation heatmap) |
 | `r_refresher_v3.R` | 36–39 | Part 4: applied case study using the school-district data — bar-of-means pitfalls at small n, ANOVA interaction plots, and the same data redesigned for three different audiences |
 | `statistics_paradigms.R` | 40–47 | Part 5: the seven statistical paradigms — descriptive, EDA (Anscombe's quartet), inferential (t-test, effect size), predictive (train/test RMSE), multivariate (PCA, k-means), nonparametric (Kruskal-Wallis, Spearman), and Bayesian (conjugate Beta updating) |
+| `generate_forecast.R` | 48–52 | Part 6: time-series forecasting toolkit — `ts()` objects and decomposition, moving-average/naive baselines, Holt-Winters exponential smoothing, ARIMA (with ACF/PACF diagnostics), and a holdout-accuracy comparison (RMSE/MAE) across all three forecasting methods |
 
 ## Applied analysis pipelines
 
@@ -27,7 +28,6 @@ Part 3 picks up at 28, etc.) — read them in this order:
 | `school_district.R` | Splits a small student roster by school with `split()`, builds a weighted-index campus ranking (60% math / 40% attendance), and charts it with `ggplot2`. |
 | `school_district_v2.R` | 700-student district: two-way ANOVA (Type I vs. Type II sums of squares for an unbalanced design), model diagnostics (Bartlett's, Shapiro-Wilk), Tukey HSD post-hoc comparisons, and automated per-school report generation archived into a zip file. |
 | `supermarket_projection.R` | 6-month grocery cost forecast with inflation and item-specific demand noise, ranks items by coefficient of variation (volatility), and produces faceted category-trend and cumulative-spend charts. |
-| `generate_forecast.R` | Placeholder stub — not yet implemented. |
 
 ## R Notebooks
 
