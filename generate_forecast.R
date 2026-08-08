@@ -1,5 +1,220 @@
 # ==============================================================================
-# GENERATE FORECAST -- STUB
+# R PROGRAMMING REFRESHER -- PART 6: TIME SERIES FORECASTING TOOLKIT
 # ==============================================================================
-# Placeholder. No implementation yet -- this file was empty.
+# Continues the numbering from Part 5 (which ended at Section 47). A
+# standalone toolkit -- not tied to the clinical/school/supermarket
+# datasets -- covering base-R forecasting from the ground up: what a ts()
+# object actually is, three progressively more capable forecasting methods
+# (moving average, Holt-Winters exponential smoothing, ARIMA), and how to
+# judge which one actually deserves to be trusted, via holdout accuracy
+# rather than in-sample fit. Standalone/runnable via Rscript or source().
+#
+# Only non-base dependency: ggplot2 (already used throughout this repo).
+# HoltWinters(), arima(), decompose(), acf()/pacf() all ship in base R's
+# `stats` package -- no `forecast`/`fable` install required for any of this.
 # ==============================================================================
+
+library(ggplot2)
+
+section <- function(num, title) {
+  bar <- paste(rep("=", 78), collapse = "")
+  cat("\n", bar, "\n", sep = "")
+  cat(sprintf("%2s. %s\n", num, title))
+  cat(bar, "\n", sep = "")
+}
+
+# ------------------------------------------------------------------------------
+section(48, "TIME SERIES OBJECTS -- ts() AND ITS THREE COMPONENTS")
+# ------------------------------------------------------------------------------
+# A synthetic monthly series with all three classic ingredients: an upward
+# TREND, a repeating 12-month SEASONAL pattern, and irreducible NOISE.
+set.seed(42)
+n_months <- 72   # 6 years of monthly data
+
+t_index  <- 1:n_months
+trend    <- 500 + 4 * t_index                 # gentle, steady growth
+seasonal <- 60 * sin(2 * pi * t_index / 12)    # repeats every 12 months
+noise    <- rnorm(n_months, mean = 0, sd = 25)
+
+demand      <- trend + seasonal + noise
+demand_ts   <- ts(demand, start = c(2020, 1), frequency = 12)
+demand_dates <- seq(as.Date("2020-01-01"), by = "month", length.out = n_months)
+
+cat("ts() bundles a plain numeric vector with a start time and a FREQUENCY\n")
+cat("(observations per cycle -- 12 for monthly data with yearly seasonality).\n")
+cat("That frequency is what every function below relies on to find seasonality.\n\n")
+cat("First 2 years:\n")
+print(window(demand_ts, end = c(2021, 12)))
+
+# decompose() splits an observed series back into its trend/seasonal/random
+# parts -- the reverse of how demand_ts was constructed above.
+decomposed <- decompose(demand_ts)
+plot(decomposed)
+
+cat("\nCompare decomposed$seasonal / $trend against the `seasonal` / `trend`\n")
+cat("vectors used to build demand_ts -- decompose() recovers them from the\n")
+cat("observed series alone, with no knowledge of how it was generated.\n")
+
+# ------------------------------------------------------------------------------
+section(49, "MOVING AVERAGE & NAIVE BASELINES -- WHAT FANCIER METHODS MUST BEAT")
+# ------------------------------------------------------------------------------
+# A centered 12-month moving average smooths out both the seasonal wiggle and
+# the noise, leaving essentially the trend alone.
+ma_12 <- filter(demand_ts, filter = rep(1 / 12, 12), sides = 2)
+
+plot(demand_ts, col = "gray50", ylab = "Demand", main = "Raw Series vs 12-Month Moving Average")
+lines(ma_12, col = "darkred", lwd = 2)
+legend("topleft", legend = c("Observed", "12-mo Moving Average"),
+       col = c("gray50", "darkred"), lty = 1, lwd = c(1, 2), bty = "n")
+
+cat("A moving average is descriptive, not predictive on its own -- it has no\n")
+cat("value for a month that hasn't happened yet (see the NA gap at each end\n")
+cat("of the red line above). It's shown here as a smoothing baseline, not a\n")
+cat("forecasting method.\n\n")
+
+# The two baselines every real forecasting method should beat:
+#   naive:          forecast = last observed value, repeated
+#   seasonal naive:  forecast = the value from exactly one cycle (12 months) ago
+last_value    <- tail(demand_ts, 1)
+seasonal_naive <- tail(demand_ts, 12)   # this year's 12 values, reused as next year's forecast
+
+cat("Naive forecast (repeat the last value):        ", round(last_value, 1), "\n")
+cat("Seasonal naive forecast for next Jan (last Jan):", round(seasonal_naive[1], 1), "\n")
+cat("If a sophisticated model can't beat these two simple rules on holdout\n")
+cat("data (Section 52), it isn't earning its complexity.\n")
+
+# ------------------------------------------------------------------------------
+section(50, "EXPONENTIAL SMOOTHING -- HoltWinters()")
+# ------------------------------------------------------------------------------
+# Holt-Winters generalizes a moving average into three smoothing weights,
+# fit automatically by default: level (alpha), trend (beta), season (gamma).
+hw_fit <- HoltWinters(demand_ts)
+
+cat("Fitted smoothing parameters (0 = trust history, 1 = trust only the\n")
+cat("newest observation):\n")
+cat(sprintf("  alpha (level):  %.3f\n", hw_fit$alpha))
+cat(sprintf("  beta  (trend):  %.3f\n", hw_fit$beta))
+cat(sprintf("  gamma (season): %.3f\n\n", hw_fit$gamma))
+
+hw_forecast <- predict(hw_fit, n.ahead = 12, prediction.interval = TRUE, level = 0.95)
+
+plot(hw_fit, hw_forecast, main = "Holt-Winters: Fitted + 12-Month Forecast (95% PI)")
+
+cat("Unlike the moving average, Holt-Winters produces genuine forecasts for\n")
+cat("months that haven't happened yet, plus a prediction interval around them\n")
+cat("(shown as the dashed band above) -- appropriate uncertainty, not a single\n")
+cat("point guess.\n")
+
+# ------------------------------------------------------------------------------
+section(51, "ARIMA -- MODELING AUTOCORRELATION DIRECTLY")
+# ------------------------------------------------------------------------------
+# ACF/PACF plots are how you'd normally choose ARIMA's (p,d,q) orders by eye;
+# shown here for the differenced series (removing the trend first, since
+# ARIMA assumes a roughly stationary series).
+diffed <- diff(demand_ts, differences = 1)
+
+par(mfrow = c(1, 2))
+acf(diffed,  main = "ACF of Differenced Series")
+pacf(diffed, main = "PACF of Differenced Series")
+par(mfrow = c(1, 1))
+
+cat("A sharp cutoff in the PACF after lag k suggests an AR(k) term; a sharp\n")
+cat("cutoff in the ACF suggests an MA term. In practice this script skips\n")
+cat("hand-tuning and fits a reasonable seasonal ARIMA(1,1,1)(1,1,0)[12]\n")
+cat("directly -- 1 non-seasonal AR/MA term plus 1 seasonal AR term, both\n")
+cat("differenced once to remove trend and seasonal drift respectively.\n\n")
+
+arima_fit <- arima(demand_ts, order = c(1, 1, 1),
+                    seasonal = list(order = c(1, 1, 0), period = 12))
+print(arima_fit)
+
+arima_forecast <- predict(arima_fit, n.ahead = 12)
+arima_upper <- arima_forecast$pred + 1.96 * arima_forecast$se
+arima_lower <- arima_forecast$pred - 1.96 * arima_forecast$se
+
+cat("\nARIMA's forecast and its prediction interval both come from the same\n")
+cat("model object (predict()'s $pred and $se) -- no separate smoothing step\n")
+cat("the way Holt-Winters needed.\n")
+
+# ------------------------------------------------------------------------------
+section(52, "COMPARING METHODS -- HOLDOUT ACCURACY, NOT IN-SAMPLE FIT")
+# ------------------------------------------------------------------------------
+# The only fair test: fit each method on the past, forecast the next 12
+# months BLIND, and score against what actually happened. Fitting and
+# scoring on the same data (in-sample fit) flatters every method equally
+# and answers a different, less useful question.
+train_ts <- window(demand_ts, end = c(2024, 12))
+test_ts  <- window(demand_ts, start = c(2025, 1))
+h        <- length(test_ts)   # 12-month holdout
+
+naive_seasonal_fc <- as.numeric(window(train_ts, start = c(2024, 1), end = c(2024, 12)))
+
+hw_train_fit <- HoltWinters(train_ts)
+hw_train_fc  <- as.numeric(predict(hw_train_fit, n.ahead = h))
+
+arima_train_fit <- arima(train_ts, order = c(1, 1, 1),
+                          seasonal = list(order = c(1, 1, 0), period = 12))
+arima_train_pred <- predict(arima_train_fit, n.ahead = h)
+arima_train_fc    <- as.numeric(arima_train_pred$pred)
+arima_train_se    <- as.numeric(arima_train_pred$se)
+
+accuracy_fun <- function(actual, forecast) {
+  c(RMSE = sqrt(mean((actual - forecast)^2)), MAE = mean(abs(actual - forecast)))
+}
+
+accuracy_tbl <- rbind(
+  data.frame(Method = "Seasonal Naive", t(accuracy_fun(as.numeric(test_ts), naive_seasonal_fc))),
+  data.frame(Method = "Holt-Winters",   t(accuracy_fun(as.numeric(test_ts), hw_train_fc))),
+  data.frame(Method = "ARIMA",          t(accuracy_fun(as.numeric(test_ts), arima_train_fc)))
+)
+accuracy_tbl$RMSE <- round(accuracy_tbl$RMSE, 2)
+accuracy_tbl$MAE  <- round(accuracy_tbl$MAE, 2)
+accuracy_tbl <- accuracy_tbl[order(accuracy_tbl$RMSE), ]
+
+cat("--- 12-MONTH HOLDOUT ACCURACY (trained through 2024-12, tested on 2025) ---\n")
+print(accuracy_tbl, row.names = FALSE)
+cat(sprintf("\nBest method on this holdout: %s\n", accuracy_tbl$Method[1]))
+
+# Visual companion to the table above -- actual vs each method's forecast
+# over the holdout window, with 95% prediction intervals shown as a ribbon.
+plot_df <- data.frame(
+  Date   = demand_dates,
+  Series = "Actual",
+  Value  = as.numeric(demand_ts),
+  Lower  = NA, Upper = NA
+)
+
+test_dates <- tail(demand_dates, h)
+
+# Holt-Winters prediction interval, computed the same way predict() did in Section 50
+hw_train_pi <- predict(hw_train_fit, n.ahead = h, prediction.interval = TRUE, level = 0.95)
+
+forecast_df <- rbind(
+  data.frame(Date = test_dates, Series = "Holt-Winters", Value = hw_train_fc,
+             Lower = as.numeric(hw_train_pi[, "lwr"]), Upper = as.numeric(hw_train_pi[, "upr"])),
+  data.frame(Date = test_dates, Series = "ARIMA", Value = arima_train_fc,
+             Lower = arima_train_fc - 1.96 * arima_train_se,
+             Upper = arima_train_fc + 1.96 * arima_train_se)
+)
+
+full_plot_df <- rbind(plot_df, forecast_df)
+full_plot_df$Series <- factor(full_plot_df$Series, levels = c("Actual", "Holt-Winters", "ARIMA"))
+
+series_colors <- c(Actual = "#2a78d6", "Holt-Winters" = "#eb6834", ARIMA = "#1baf7a")
+
+forecast_comparison_plot <- ggplot(full_plot_df, aes(x = Date, y = Value, color = Series)) +
+  geom_ribbon(data = subset(full_plot_df, Series != "Actual"),
+              aes(ymin = Lower, ymax = Upper, fill = Series), alpha = 0.15, color = NA) +
+  geom_line(linewidth = 0.9) +
+  geom_vline(xintercept = as.numeric(test_dates[1]), linetype = "dashed", color = "gray50") +
+  scale_color_manual(values = series_colors) +
+  scale_fill_manual(values = series_colors) +
+  labs(title = "12-Month Holdout Forecast: Holt-Winters vs ARIMA (95% PI)",
+       subtitle = "Dashed line marks the train/test split -- both methods forecast blind past this point",
+       x = NULL, y = "Demand", color = "Series", fill = "Series") +
+  theme_minimal()
+
+print(forecast_comparison_plot)
+
+cat("\n", paste(rep("=", 78), collapse = ""), "\n", sep = "")
+cat("PART 6 COMPLETE.\n")
