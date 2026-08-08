@@ -1,0 +1,298 @@
+# ==============================================================================
+# R PROGRAMMING REFRESHER -- PART 5: STATISTICAL PARADIGMS
+# Descriptive, EDA, Inferential, Predictive, Multivariate, Nonparametric, Bayesian
+# ==============================================================================
+# Continues the numbering from Part 4 (which ended at Section 39). Standalone/
+# runnable via Rscript or source(). Requires only ggplot2 -- Section 47's
+# Bayesian example deliberately uses base R's dbeta()/qbeta() (conjugate
+# updating) rather than Stan/JAGS/brms, which need heavy compiled toolchains.
+#
+# A Python parallel to this file is a natural next step, per your note --
+# not attempted here.
+# ==============================================================================
+
+library(ggplot2)
+
+section <- function(num, title) {
+  bar <- paste(rep("=", 78), collapse = "")
+  cat("\n", bar, "\n", sep = "")
+  cat(sprintf("%2s. %s\n", num, title))
+  cat(bar, "\n", sep = "")
+}
+
+# ------------------------------------------------------------------------------
+section(40, "THE SEVEN STATISTICAL PARADIGMS -- OVERVIEW")
+# ------------------------------------------------------------------------------
+overview <- data.frame(
+  Paradigm      = c("Descriptive", "EDA", "Inferential", "Predictive",
+                     "Multivariate", "Nonparametric", "Bayesian"),
+  Core_Question = c(
+    "What does the data I have look like?",
+    "What patterns/anomalies haven't I found yet?",
+    "What can I claim about the population, from a sample?",
+    "How accurately can I forecast NEW, unseen cases?",
+    "How do many variables behave TOGETHER?",
+    "Can I answer without assuming a distribution shape?",
+    "How should new data update what I already believed?"
+  ),
+  Example_R_Tools = c(
+    "mean(), sd(), summary()",
+    "hist(), boxplot(), pairs(), anscombe dataset",
+    "t.test(), confint(), p-values",
+    "lm()/glm() + predict() on a holdout set",
+    "prcomp(), kmeans(), cor()",
+    "wilcox.test(), kruskal.test(), Spearman cor()",
+    "dbeta()/qbeta() conjugate updates, credible intervals"
+  ),
+  stringsAsFactors = FALSE
+)
+print(overview, row.names = FALSE)
+
+cat("\nThese aren't mutually exclusive toolkits -- the SAME lm() call shows up\n")
+cat("in both Section 43 (inferential, reading the p-value) and Section 44\n")
+cat("(predictive, reading holdout RMSE and ignoring the p-value entirely).\n")
+cat("What changes is the QUESTION being asked of the model, not the code.\n")
+
+# ------------------------------------------------------------------------------
+section(41, "DESCRIPTIVE STATISTICS -- SUMMARIZING THE DATA YOU HAVE")
+# ------------------------------------------------------------------------------
+set.seed(1)
+class_scores <- round(c(rnorm(28, 78, 9), 40, 42))  # + 2 deliberate low outliers
+
+cat("Central tendency:\n")
+cat("  mean:  ", mean(class_scores), "\n")
+cat("  median:", median(class_scores), "\n")
+
+cat("\nDispersion:\n")
+cat("  sd:       ", round(sd(class_scores), 2), "\n")
+cat("  variance: ", round(var(class_scores), 2), "\n")
+cat("  IQR:      ", IQR(class_scores), "\n")
+cat("  range:    ", diff(range(class_scores)), "\n")
+
+skewness <- function(x) {
+  x <- x - mean(x)
+  (sum(x^3) / length(x)) / (sum(x^2) / length(x))^1.5
+}
+cat("\nShape -- a simple skewness statistic (no extra package needed):\n")
+cat("  skewness:", round(skewness(class_scores), 2),
+    "(negative = left-skewed, pulled down by the two low outliers)\n")
+
+cat("\nFull five-number summary:\n")
+print(summary(class_scores))
+
+cat("\nDescriptive statistics answer exactly ONE question: 'what does the\n")
+cat("data I already have look like'. No claim about any wider population is\n")
+cat("being made here -- that step is Section 43.\n")
+
+# ------------------------------------------------------------------------------
+section(42, "EXPLORATORY DATA ANALYSIS (EDA) -- WHY YOU MUST ALSO LOOK")
+# ------------------------------------------------------------------------------
+data(anscombe)  # ships with base R's datasets package -- 4 x/y pairs, built for this exact point
+
+for (i in 1:4) {
+  x <- anscombe[[paste0("x", i)]]
+  y <- anscombe[[paste0("y", i)]]
+  cat(sprintf("Set %d: mean(x)=%.2f  mean(y)=%.2f  sd(x)=%.2f  sd(y)=%.2f  cor=%.3f\n",
+              i, mean(x), mean(y), sd(x), sd(y), cor(x, y)))
+}
+cat("\nAll four datasets share nearly IDENTICAL descriptive statistics -- same\n")
+cat("mean, same variance, same correlation. Section 41's numbers alone would\n")
+cat("say these are the same dataset. They are not:\n")
+
+par(mfrow = c(2, 2))
+for (i in 1:4) {
+  x <- anscombe[[paste0("x", i)]]
+  y <- anscombe[[paste0("y", i)]]
+  plot(x, y, main = paste("Anscombe Set", i), pch = 19, col = "steelblue")
+  abline(lm(y ~ x), col = "darkred")
+}
+par(mfrow = c(1, 1))
+
+cat("\nSet 1 is a genuine linear relationship. Set 2 is curved (a straight\n")
+cat("line is the wrong model). Set 3 has one outlier distorting an otherwise\n")
+cat("perfect line. Set 4 is driven entirely by a single high-leverage point.\n")
+cat("Anscombe (1973) built this quartet specifically to make the point: EDA\n")
+cat("-- actually looking -- is not optional, and summary statistics can\n")
+cat("actively mislead without it.\n")
+
+# ------------------------------------------------------------------------------
+section(43, "INFERENTIAL STATISTICS -- GENERALIZING FROM SAMPLE TO POPULATION")
+# ------------------------------------------------------------------------------
+set.seed(3)
+sample_attendance <- rnorm(45, mean = 0.87, sd = 0.07)
+
+test_result <- t.test(sample_attendance, mu = 0.90)
+cat("Descriptive fact:  this SAMPLE's mean attendance is",
+    round(mean(sample_attendance), 4), "\n")
+cat("Inferential claim: the district's TRUE mean attendance is somewhere in\n")
+cat("the 95% CI [", round(test_result$conf.int[1], 4), ",",
+    round(test_result$conf.int[2], 4), "]\n")
+cat("p-value against H0: true mean = 0.90 ->",
+    format.pval(test_result$p.value, digits = 3), "\n\n")
+
+cohens_d <- (mean(sample_attendance) - 0.90) / sd(sample_attendance)
+cat("Effect size matters as much as the p-value -- a tiny, practically\n")
+cat("meaningless difference can still be 'significant' with enough data.\n")
+cat("Cohen's d =", round(cohens_d, 3),
+    ifelse(abs(cohens_d) < 0.2, "(negligible)",
+    ifelse(abs(cohens_d) < 0.5, "(small)", "(moderate/large)")), "\n\n")
+
+cat("The point of inference: the SAMPLE isn't what you actually care about.\n")
+cat("You're using it to make a defensible claim about a POPULATION you\n")
+cat("didn't fully observe -- a line Section 41 (descriptive) never crosses.\n")
+
+# ------------------------------------------------------------------------------
+section(44, "PREDICTIVE STATISTICS -- OPTIMIZING FOR ACCURACY ON NEW DATA")
+# ------------------------------------------------------------------------------
+set.seed(5)
+n <- 200
+full_df <- data.frame(
+  hours_studied = runif(n, 0, 10),
+  attendance    = runif(n, 0.5, 1.0)
+)
+full_df$exam_score <- 45 + 3.5 * full_df$hours_studied + 30 * full_df$attendance + rnorm(n, sd = 6)
+
+train_idx <- sample(1:n, size = 0.75 * n)
+train_df  <- full_df[train_idx, ]
+test_df   <- full_df[-train_idx, ]
+
+pred_model  <- lm(exam_score ~ hours_studied + attendance, data = train_df)
+predictions <- predict(pred_model, newdata = test_df)
+
+rmse <- sqrt(mean((test_df$exam_score - predictions)^2))
+mae  <- mean(abs(test_df$exam_score - predictions))
+
+cat("Trained on", nrow(train_df), "rows, evaluated on", nrow(test_df), "UNSEEN rows.\n")
+cat("Test RMSE:", round(rmse, 2), " | Test MAE:", round(mae, 2), "\n\n")
+
+cat("Notice what's absent compared to Section 43: no p-value, no confidence\n")
+cat('interval on a coefficient. The question here is not "is hours_studied\n')
+cat('significantly related to score in the population" -- it\'s "how close\n')
+cat('are my forecasts on data the model never saw." Same lm() function,\n')
+cat("genuinely different goal, different success metric entirely.\n")
+
+# ------------------------------------------------------------------------------
+section(45, "MULTIVARIATE STATISTICS -- MANY VARIABLES, ANALYZED TOGETHER")
+# ------------------------------------------------------------------------------
+set.seed(9)
+multi_df <- data.frame(
+  hours_studied = runif(80, 0, 10),
+  sleep_hours   = runif(80, 4, 9),
+  attendance    = runif(80, 0.5, 1.0)
+)
+multi_df$exam_score <- 40 + 4 * multi_df$hours_studied + 3 * multi_df$sleep_hours +
+                        30 * multi_df$attendance + rnorm(80, sd = 5)
+
+# ---- PCA: compress correlated variables into fewer, uncorrelated axes ----
+pca_result <- prcomp(multi_df, scale. = TRUE)
+cat("Proportion of variance explained by each principal component:\n")
+print(summary(pca_result)$importance[2, ])
+cat("\nThe first couple of components usually capture most of the spread\n")
+cat("across ALL original variables at once -- useful once there are too\n")
+cat("many numeric variables to eyeball directly with pairs() (Part 3,\n")
+cat("Section 35).\n\n")
+
+biplot(pca_result, main = "PCA Biplot -- Variables and Observations Together")
+
+# ---- k-means: unsupervised grouping, no outcome variable at all ----
+set.seed(2)
+cluster_df <- data.frame(
+  spending = c(rnorm(30, 20, 5), rnorm(30, 80, 8)),
+  visits   = c(rnorm(30, 3, 1), rnorm(30, 12, 2))
+)
+km <- kmeans(scale(cluster_df), centers = 2)
+
+print(
+  ggplot(cluster_df, aes(x = spending, y = visits, color = factor(km$cluster))) +
+    geom_point(size = 2.5) +
+    labs(title = "k-means Clustering (k=2) -- No Labels Given, Groups Discovered",
+         color = "Cluster") +
+    theme_minimal()
+)
+cat("PCA and k-means both work on the WHOLE variable set jointly rather\n")
+cat("than one relationship at a time -- and k-means needs no outcome\n")
+cat("variable at all, unlike everything in Sections 43-44.\n")
+
+# ------------------------------------------------------------------------------
+section(46, "NONPARAMETRIC STATISTICS -- NO DISTRIBUTIONAL SHAPE ASSUMED")
+# ------------------------------------------------------------------------------
+set.seed(15)
+dept_scores <- data.frame(
+  Department = rep(c("Eng", "Sales", "Support"), each = 15),
+  Rating     = c(rexp(15, rate = 0.10), rexp(15, rate = 0.07), rexp(15, rate = 0.20))
+)
+
+cat("Kruskal-Wallis -- nonparametric alternative to one-way ANOVA. Works on\n")
+cat("RANKS instead of raw values, so it doesn't assume normal residuals:\n")
+print(kruskal.test(Rating ~ Department, data = dept_scores))
+
+cat("\nSpearman correlation -- nonparametric alternative to Pearson's r,\n")
+cat("measures a MONOTONIC relationship (doesn't need to be a straight line):\n")
+set.seed(16)
+x_mono <- 1:50
+y_mono <- x_mono^3 + rnorm(50, sd = 2000)   # monotonic, but clearly not linear
+
+cat("  Pearson  (assumes linear):    ", round(cor(x_mono, y_mono, method = "pearson"), 3), "\n")
+cat("  Spearman (assumes monotonic): ", round(cor(x_mono, y_mono, method = "spearman"), 3), "\n")
+cat("  Spearman correctly reads this as a near-perfect relationship;\n")
+cat("  Pearson understates it because the true relationship is curved.\n\n")
+
+cat("Nonparametric methods trade a little statistical power (when the\n")
+cat("parametric assumptions genuinely hold) for robustness (when they\n")
+cat("don't) -- exactly the same trade rlm() made against lm() back in\n")
+cat("Part 1, Section 22.\n")
+
+# ------------------------------------------------------------------------------
+section(47, "BAYESIAN STATISTICS -- UPDATING A BELIEF WITH DATA")
+# ------------------------------------------------------------------------------
+# Question: what's the true pass rate for a new intervention program?
+# Prior belief BEFORE seeing any data: centered around 60%, moderately
+# confident. Beta is the natural ("conjugate") prior for a proportion --
+# ties directly back to Part 2, Section 27's distribution reference table.
+prior_alpha <- 6; prior_beta <- 4   # Beta(6,4) -- prior mean = 6/(6+4) = 0.60
+
+n_students <- 45
+n_passed   <- 33   # observed: 33 of 45 students passed
+
+# Conjugacy makes the update trivial -- no simulation, no MCMC needed. Just
+# add successes/failures directly onto the prior's own parameters:
+post_alpha <- prior_alpha + n_passed
+post_beta  <- prior_beta + (n_students - n_passed)
+
+cat("Prior belief:     Beta(", prior_alpha, ",", prior_beta, ") -- mean =",
+    round(prior_alpha / (prior_alpha + prior_beta), 3), "\n")
+cat("Observed data:    ", n_passed, "passed out of", n_students, "\n")
+cat("Posterior belief: Beta(", post_alpha, ",", post_beta, ") -- mean =",
+    round(post_alpha / (post_alpha + post_beta), 3), "\n\n")
+
+# 95% credible interval -- a genuinely different interpretation from a
+# frequentist CI: "given the prior and this data, there's a 95% probability
+# the true rate is in here" -- not "95% of such intervals would contain the
+# true value under infinite repeated sampling."
+credible_interval <- qbeta(c(0.025, 0.975), post_alpha, post_beta)
+cat("95% credible interval for the true pass rate:",
+    round(credible_interval[1], 3), "to", round(credible_interval[2], 3), "\n\n")
+
+theta <- seq(0, 1, length.out = 300)
+bayes_df <- data.frame(
+  theta        = rep(theta, 2),
+  density      = c(dbeta(theta, prior_alpha, prior_beta), dbeta(theta, post_alpha, post_beta)),
+  Distribution = rep(c("Prior", "Posterior"), each = length(theta))
+)
+
+print(
+  ggplot(bayes_df, aes(x = theta, y = density, color = Distribution)) +
+    geom_line(linewidth = 1.2) +
+    labs(title = "Prior vs Posterior Belief About the True Pass Rate",
+         x = "True Pass Rate (theta)", y = "Density") +
+    theme_minimal()
+)
+
+cat("The posterior is visibly narrower and pulled toward the observed\n")
+cat("33/45 = 73% rate -- more data pulls belief away from the prior and\n")
+cat("tightens it. This entire update used only dbeta()/qbeta() from Part 2's\n")
+cat("distribution table -- no MCMC and no Stan/JAGS/brms install required\n")
+cat("for this class of problem (a single proportion with a conjugate prior).\n")
+
+cat("\n", paste(rep("=", 78), collapse = ""), "\n", sep = "")
+cat("PART 5 COMPLETE.\n")

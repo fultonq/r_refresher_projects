@@ -1,0 +1,214 @@
+# ==============================================================================
+# CLINICAL STUDY DATA ANALYSIS PIPELINE: 1700 PATIENTS, 3 SITES, 3 VISITS  [V2]
+# ==============================================================================
+# Extends clinical_trials.R from a single-site, 39-patient pilot to a
+# multi-site, 1700-patient trial. Changes from clinical_trials.R:
+#   1. ADDED: a third grouping dimension, Site (3 sites), on top of the
+#      existing Study_Arm (Alpha/Placebo) -- unequal enrollment per site,
+#      mirroring how real multi-site trials rarely recruit evenly.
+#   2. ADDED: a per-site baseline offset in the simulated biomarker, so Site
+#      is a genuine potential confounder -- the whole point of the extended
+#      analysis below is to show why that matters.
+#   3. CHANGED: the naive two-arm Welch t-test is kept for comparison, but
+#      the primary inference is now a Site-adjusted linear model
+#      (Change ~ Study_Arm + Site), plus an Arm x Site interaction check --
+#      a pooled t-test at n=1700 across 3 sites would silently absorb any
+#      site-level differences into apparent "treatment" effect.
+#   4. CHANGED: the trajectory plot. matplot() drawing one line per patient
+#      is a solid ink blot at 1700 patients -- replaced with a ggplot2 plot
+#      of mean +/- SE trajectory per Site x Arm (facetted by Site), which is
+#      what's actually readable at this N.
+#   5. ADDED: an interaction.plot() of Site x Arm on the change score, the
+#      direct visual companion to the interaction term tested in the model.
+#   6. ADDED: a real, modest Alpha treatment effect (Placebo stays flat).
+#      Previously both arms were drawn from the identical distribution with
+#      no time trend, so the trajectory plot showed two overlapping flat
+#      noisy lines -- visually flat/unrealistic for a trial figure. Alpha
+#      now gains +3 by Day_14 and +6 by Day_28 on top of the per-patient
+#      noise; Placebo is unchanged. Arms remain balanced within each site,
+#      so this does not reintroduce the Site confound Step 6 controls for.
+# ==============================================================================
+
+library(ggplot2)
+
+# ------------------------------------------------------------------------------
+# STEP 1: ESTABLISH TIMELINES, SITES, PATIENT GROUPS, AND VECTORS
+# ------------------------------------------------------------------------------
+days_elapsed <- seq(from = 0, to = 28, by = 14)
+labs         <- paste("Day_", days_elapsed, sep = "") # "Day_0" "Day_14" "Day_28"
+
+sites      <- c("Site_A", "Site_B", "Site_C")
+site_sizes <- c(700, 600, 400)                # unequal enrollment across sites
+n_patients <- sum(site_sizes)                 # 1700
+
+# Site assignment: blocked by site, in enrollment order (deterministic, like
+# the original script's rep()-based arm assignment -- no randomization needed
+# here, since set.seed() below governs only the simulated lab values).
+patient_sites <- rep(sites, times = site_sizes)
+
+# Arm assignment: ~1:1 within EACH site (stratified by site), same rep()
+# pattern the original script used for its single 20/19 split.
+patient_groups <- unlist(mapply(
+  function(sz) rep(c("Alpha", "Placebo"), times = c(ceiling(sz / 2), floor(sz / 2))),
+  site_sizes, SIMPLIFY = FALSE
+))
+
+patient_ids <- paste("PT_", 1:n_patients, sep = "")
+
+cat("Enrollment by site and arm:\n")
+print(table(Site = patient_sites, Arm = patient_groups))
+
+# ------------------------------------------------------------------------------
+# STEP 2: SIMULATE REALISTIC LAB METRICS & INJECT ANOMALIES (NA, NaN)
+# ------------------------------------------------------------------------------
+set.seed(123)
+
+# Per-site baseline offset -- a real, systematic difference between sites
+# (different equipment/population), NOT a treatment effect. This is exactly
+# the kind of confound a pooled, site-blind t-test cannot see.
+site_effect <- c(Site_A = 0, Site_B = 4, Site_C = -3)
+
+# Real (modest) treatment effect for Alpha, absent in Placebo -- a flat
+# placebo arm with a genuinely improving Alpha arm is what an actual trial
+# figure looks like. Effect builds in gradually (half at Day_14, full by
+# Day_28) rather than jumping instantly, and it's on top of per-patient
+# noise (sd=12) so individual trajectories still look organic -- only the
+# arm MEANS clearly separate, which is exactly why Step 7 aggregates.
+day_effect     <- c(Day_0 = 0, Day_14 = 3, Day_28 = 6)
+arm_multiplier <- ifelse(patient_groups == "Alpha", 1, 0)   # 1 = Alpha, 0 = Placebo
+treatment_effect <- outer(arm_multiplier, day_effect)       # n_patients x 3
+
+raw_values <- rnorm(n = n_patients * 3, mean = 75, sd = 12)
+lab_matrix <- matrix(raw_values, nrow = n_patients, ncol = 3)
+lab_matrix <- lab_matrix + site_effect[patient_sites]        # recycles down each column, i.e. per patient row
+lab_matrix <- lab_matrix + treatment_effect
+
+rownames(lab_matrix) <- patient_ids
+colnames(lab_matrix) <- labs
+
+# Missingness scaled up from the original's illustrative 2 NA + 1 NaN out of
+# 117 cells to the same rough rate across 5100 cells (1700 x 3).
+na_count  <- round(0.02  * length(lab_matrix))   # ~2% MCAR missingness
+nan_count <- round(0.005 * length(lab_matrix))   # ~0.5% instrument glitches
+
+na_idx  <- sample(seq_along(lab_matrix), na_count)
+nan_idx <- sample(setdiff(seq_along(lab_matrix), na_idx), nan_count)
+
+lab_matrix[na_idx]  <- NA
+lab_matrix[nan_idx] <- 0 / 0   # NaN: simulated instrument glitch
+
+# ------------------------------------------------------------------------------
+# STEP 3: AUDIT DATA INTEGRITY AND DETECT GAPS USING is.na()
+# ------------------------------------------------------------------------------
+print("--- DATA QUALITY REPORT ---")
+
+total_gaps <- sum(is.na(lab_matrix))          # is.na() catches NA AND NaN
+print(paste("Total corrupted/missing values found:", total_gaps))
+
+nan_count_found <- sum(is.nan(lab_matrix))    # NaN specifically
+print(paste("Mathematical NaN anomalies detected:", nan_count_found))
+
+print("Missing values tallied by visit day:")
+print(colSums(is.na(lab_matrix)))
+
+print("Missing values tallied by site:")
+print(tapply(rowSums(is.na(lab_matrix)), patient_sites, sum))
+
+# ------------------------------------------------------------------------------
+# STEP 4: BUILD THE ANALYSIS DATA FRAME
+# ------------------------------------------------------------------------------
+patient_df <- as.data.frame(lab_matrix)
+patient_df$Patient_ID <- rownames(lab_matrix)
+patient_df$Site       <- factor(patient_sites, levels = sites)
+patient_df$Study_Arm  <- factor(patient_groups, levels = c("Alpha", "Placebo"))
+patient_df <- patient_df[, c("Patient_ID", "Site", "Study_Arm", "Day_0", "Day_14", "Day_28")]
+
+# ------------------------------------------------------------------------------
+# STEP 5: PER-SITE, PER-ARM DESCRIPTIVE SUMMARY (mean, SD, n complete)
+# ------------------------------------------------------------------------------
+long_df <- do.call(rbind, lapply(labs, function(v) {
+  data.frame(Visit = v, Site = patient_df$Site, Study_Arm = patient_df$Study_Arm,
+             Value = patient_df[[v]])
+}))
+long_df$Visit <- factor(long_df$Visit, levels = labs)
+
+stat_fun <- function(x) c(Mean = mean(x, na.rm = TRUE), SD = sd(x, na.rm = TRUE), N = sum(!is.na(x)))
+
+summary_tbl <- aggregate(Value ~ Visit + Site + Study_Arm, data = long_df, FUN = stat_fun)
+summary_tbl <- do.call(data.frame, summary_tbl)
+names(summary_tbl) <- c("Visit", "Site", "Study_Arm", "Mean", "SD", "N")
+summary_tbl$Mean <- round(summary_tbl$Mean, 2)
+summary_tbl$SD   <- round(summary_tbl$SD, 2)
+summary_tbl$SE   <- round(summary_tbl$SD / sqrt(summary_tbl$N), 2)
+summary_tbl <- summary_tbl[order(summary_tbl$Visit, summary_tbl$Site, summary_tbl$Study_Arm), ]
+
+cat("\n--- PER-SITE, PER-ARM SUMMARY (mean, SD, SE, n complete) ---\n")
+print(summary_tbl, row.names = FALSE)
+
+# ------------------------------------------------------------------------------
+# STEP 6: ACTUAL TRIAL INFERENCE -- change score, Day_0 to Day_28
+# ------------------------------------------------------------------------------
+# A patient only contributes if BOTH Day_0 and Day_28 are present (paired design).
+patient_df$Change_D0_D28 <- patient_df$Day_28 - patient_df$Day_0
+complete_change <- patient_df[!is.na(patient_df$Change_D0_D28), ]
+
+cat(sprintf("\nPatients with complete Day_0/Day_28 pair: %d of %d\n",
+            nrow(complete_change), nrow(patient_df)))
+
+naive_test <- t.test(Change_D0_D28 ~ Study_Arm, data = complete_change)
+cat("\n--- NAIVE (SITE-BLIND) ALPHA vs PLACEBO: Welch t-test ---\n")
+print(naive_test)
+
+# Site-adjusted model: does the arm effect survive once Site is accounted for?
+adjusted_fit <- lm(Change_D0_D28 ~ Study_Arm + Site, data = complete_change)
+cat("\n--- SITE-ADJUSTED MODEL: Change ~ Study_Arm + Site ---\n")
+print(summary(adjusted_fit))
+
+# Interaction check: is the arm effect consistent ACROSS sites, or does it
+# differ by site (i.e. does treatment work differently at different sites)?
+interaction_fit <- lm(Change_D0_D28 ~ Study_Arm * Site, data = complete_change)
+cat("\n--- DOES THE ARM EFFECT VARY BY SITE? (nested model F-test) ---\n")
+print(anova(adjusted_fit, interaction_fit))
+cat("A non-significant F-test here means the additive model (no interaction)\n")
+cat("is not rejected -- the arm effect is consistent across sites, so the\n")
+cat("simpler Site-adjusted model above is the one to report.\n")
+
+# ------------------------------------------------------------------------------
+# STEP 7: VISUALIZE -- mean trajectory by Site x Arm (readable at n=1700),
+#         plus an interaction plot as the direct companion to Step 6's test.
+# ------------------------------------------------------------------------------
+arm_colors <- c(Alpha = "#2a78d6", Placebo = "#eb6834")   # validated categorical pair
+
+summary_tbl$Day <- as.numeric(sub("Day_", "", summary_tbl$Visit))
+
+print(
+  ggplot(summary_tbl, aes(x = Day, y = Mean, color = Study_Arm, fill = Study_Arm)) +
+    geom_ribbon(aes(ymin = Mean - SE, ymax = Mean + SE), alpha = 0.15, color = NA) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2) +
+    facet_wrap(~ Site) +
+    scale_color_manual(values = arm_colors) +
+    scale_fill_manual(values = arm_colors) +
+    scale_x_continuous(breaks = days_elapsed) +
+    labs(title = "Mean Biomarker Trajectory by Site and Arm (± SE)",
+         subtitle = paste0("N = ", n_patients, " patients across ", length(sites), " sites"),
+         x = "Timeline (Days Post-Enrollment)", y = "Mean Biomarker Level (mg/dL)",
+         color = "Study Arm", fill = "Study Arm") +
+    theme_minimal()
+)
+
+interaction.plot(
+  x.factor = complete_change$Site, trace.factor = complete_change$Study_Arm,
+  response = complete_change$Change_D0_D28, fun = mean, type = "b", pch = 19,
+  col = arm_colors[c("Alpha", "Placebo")],
+  xlab = "Site", ylab = "Mean Change (Day 0 to Day 28)", trace.label = "Study Arm",
+  main = "Interaction Plot: Site x Arm on Change Score"
+)
+
+# ------------------------------------------------------------------------------
+# STEP 8: SAVE DATA TO LOCAL DRIVE
+# ------------------------------------------------------------------------------
+write.csv(patient_df, file = "clinical_trial_data_3site.csv", row.names = FALSE)
+
+print("--- PIPELINE COMPLETED ---")
+print(paste("CSV file successfully saved to active directory:", getwd()))

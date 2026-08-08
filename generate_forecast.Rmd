@@ -1,0 +1,15 @@
+---
+title: "Generate Forecast -- Stub"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 2
+    number_sections: false
+---
+
+GENERATE FORECAST -- STUB
+Placeholder. No implementation yet -- this file was empty.
+
+```{r stub}
+# No code yet -- fill in once generate_forecast.R has an implementation.
+```

@@ -1,0 +1,184 @@
+# =======================;=======================================================
+# R PROGRAMMING REFRESHER -- PART 4: APPLIED CASE STUDY
+# CHART SELECTION FOR school_district.R / school_district_v2.R
+# ==============================================================================
+# Continues the numbering from Part 3 (which ended at Section 35). Answers a
+# real question directly: given the actual variables in the school-district
+# scripts, which chart fits, and how does that answer change with audience?
+# Standalone/runnable via Rscript or source(). Requires only ggplot2.
+# ==============================================================================
+
+library(ggplot2)
+
+section <- function(num, title) {
+  bar <- paste(rep("=", 78), collapse = "")
+  cat("\n", bar, "\n", sep = "")
+  cat(sprintf("%2s. %s\n", num, title))
+  cat(bar, "\n", sep = "")
+}
+
+# ------------------------------------------------------------------------------
+section(36, "WHY BAR-OF-MEANS CAN MISLEAD WITH SMALL SAMPLES (n=3 PER SCHOOL)")
+# ------------------------------------------------------------------------------
+students_df <- data.frame(
+  Student_ID = paste0("STU-", 101:106),
+  School     = rep(c("Lincoln High", "Washington High"), each = 3),
+  Attendance = c(0.96, 0.82, 0.99, 0.74, 0.91, 0.88),
+  Math_Grade = c(88, 54, 95, 62, 71, NA)
+)
+
+school_means <- aggregate(Math_Grade ~ School, data = students_df, FUN = mean, na.rm = TRUE)
+
+print(
+  ggplot(school_means, aes(x = School, y = Math_Grade, fill = School)) +
+    geom_col(width = 0.5) +
+    geom_text(aes(label = round(Math_Grade, 1)), vjust = -0.5) +
+    labs(title = "Average Math Grade by School (n=3 per school)", y = "Mean Math Grade") +
+    theme_minimal() + theme(legend.position = "none")
+)
+
+cat("This bar chart LOOKS like a confident, settled comparison. But each bar\n")
+cat("is the average of just 2-3 students -- with only 5 non-missing scores\n")
+cat("total, that gap could easily be noise. A bar-of-means chart has no\n")
+cat("visual mechanism to show you that.\n\n")
+
+print(
+  ggplot(students_df, aes(x = School, y = Math_Grade, color = School)) +
+    geom_jitter(width = 0.05, size = 3, na.rm = TRUE) +
+    stat_summary(fun = mean, geom = "point", shape = 18, size = 5, color = "black", na.rm = TRUE) +
+    labs(title = "Same Data -- Every Point Shown (n honestly visible)",
+         subtitle = "Black diamond = mean. Now the sample size is impossible to miss.",
+         y = "Math Grade") +
+    theme_minimal() + theme(legend.position = "none")
+)
+
+cat("With n this small, showing every jittered point (or a boxplot, once n\n")
+cat("is large enough for one to be meaningful) is the more honest chart.\n")
+cat("Bar-of-means is best reserved for when n per group is large enough that\n")
+cat("the mean itself is a stable, trustworthy summary -- which is exactly\n")
+cat("the situation in Section 37 below, at n=700.\n")
+
+# ------------------------------------------------------------------------------
+section(37, "THE RIGHT COMPANION CHART FOR A TWO-WAY ANOVA: INTERACTION PLOT")
+# ------------------------------------------------------------------------------
+set.seed(2026)
+total_students <- 700
+campus_names <- c("Lincoln High", "Washington High", "Jefferson Middle", "Kennedy Elementary",
+                   "Madison Academy", "Roosevelt Tech", "Garfield Charter")
+races_pool <- c("Asian/Pas. Islander", "Hispanic/Latino", "Black/African Amer.", "White/Caucasian")
+
+students_v2 <- data.frame(
+  School         = sample(campus_names, total_students, replace = TRUE),
+  Race_Ethnicity = sample(races_pool, total_students, replace = TRUE, prob = c(0.15, 0.35, 0.25, 0.25)),
+  Math_Grade     = round(pmin(pmax(rnorm(total_students, 76, 12), 45), 100), 0)
+)
+students_v2$Math_Grade[sample(1:total_students, size = total_students * 0.05)] <- NA
+
+# Collapse to the 3 largest schools for a readable interaction plot --
+# all 7 schools x 4 subgroups would be 28 crossing lines, unreadable.
+top3_schools <- names(sort(table(students_v2$School), decreasing = TRUE))[1:3]
+plot_subset  <- subset(students_v2, School %in% top3_schools & !is.na(Math_Grade))
+
+interaction.plot(
+  x.factor = plot_subset$Race_Ethnicity,
+  trace.factor = plot_subset$School,
+  response = plot_subset$Math_Grade,
+  fun = mean, type = "b", pch = 19, col = c("steelblue", "darkred", "darkgreen"),
+  xlab = "Race/Ethnicity", ylab = "Mean Math Grade", trace.label = "School",
+  main = "Interaction Plot: School x Race/Ethnicity on Math Grade"
+)
+
+cat("This is the chart a two-way ANOVA is actually FOR. Roughly parallel\n")
+cat("lines mean the effect of Race/Ethnicity is consistent across schools --\n")
+cat("no real interaction, matching the Type II test from Part 2 (which\n")
+cat("assumes exactly that). Crossing or fanning-out lines are the\n")
+cat("interaction the omnibus ANOVA p-value was testing for -- visible\n")
+cat("directly here, instead of read off a table of F-statistics.\n")
+
+# ------------------------------------------------------------------------------
+section(38, "A RELATIONSHIP CHECK MISSING FROM THE ORIGINAL SCRIPTS")
+# ------------------------------------------------------------------------------
+set.seed(21)
+attendance_grade_df <- data.frame(Attendance = pmin(pmax(rnorm(300, 0.88, 0.08), 0.5), 1))
+attendance_grade_df$Math_Grade <- pmin(pmax(
+  40 + 55 * attendance_grade_df$Attendance + rnorm(300, sd = 8), 0), 100)
+
+print(
+  ggplot(attendance_grade_df, aes(x = Attendance, y = Math_Grade)) +
+    geom_point(alpha = 0.4, color = "steelblue") +
+    geom_smooth(method = "lm", color = "darkred") +
+    labs(title = "Attendance vs Math Grade -- Scatter Plot",
+         x = "Attendance Rate", y = "Math Grade") +
+    theme_minimal()
+)
+
+cat("Neither school_district.R nor school_district_v2.R ever plots Attendance\n")
+cat("against Math_Grade directly -- yet 'does attendance predict grades' is\n")
+cat("probably the single most policy-relevant question sitting in this data.\n")
+cat("Per Part 3, Section 31: two numeric variables, relationship question ->\n")
+cat("scatter plot is the chart built for exactly this.\n")
+
+# ------------------------------------------------------------------------------
+section(39, "SAME UNDERLYING DATA, THREE AUDIENCES")
+# ------------------------------------------------------------------------------
+board_data <- subset(students_v2, School %in% top3_schools)
+board_summary <- aggregate(Math_Grade ~ School, data = board_data, FUN = mean, na.rm = TRUE)
+
+# ---- Version 1: School board / public-facing --------------------------------
+print(
+  ggplot(board_summary, aes(x = reorder(School, Math_Grade), y = Math_Grade)) +
+    geom_col(fill = "#2C5F8A", width = 0.55) +
+    geom_text(aes(label = round(Math_Grade, 0)), hjust = -0.3, size = 5) +
+    coord_flip() +
+    labs(title = "Average Math Score by Campus", x = NULL, y = NULL) +
+    theme_minimal(base_size = 15) +
+    theme(axis.text.x = element_blank(), panel.grid = element_blank())
+)
+cat("BOARD / PUBLIC VERSION: one message, one chart. No error bars, no\n")
+cat("p-values, no jargon -- a board member has seconds, not minutes, and\n")
+cat("doesn't need (or want) to interpret a boxplot's whiskers.\n\n")
+
+# ---- Version 2: Internal analyst / statistics team ---------------------------
+print(
+  ggplot(subset(students_v2, School %in% top3_schools & !is.na(Math_Grade)),
+         aes(x = School, y = Math_Grade, fill = School)) +
+    geom_boxplot(alpha = 0.6, outlier.color = "red") +
+    geom_jitter(width = 0.15, alpha = 0.15, size = 0.6) +
+    labs(title = "Math Grade Distribution by Campus (n visible, outliers flagged)",
+         subtitle = "Companion to the two-way ANOVA / Type II SS results from Part 2",
+         y = "Math Grade") +
+    theme_minimal() + theme(legend.position = "none")
+)
+cat("ANALYST VERSION: full distribution, sample size visible via jitter,\n")
+cat("outliers flagged -- meant to sit next to the ANOVA table and diagnostic\n")
+cat("plots from Part 2, for a reader who will ask about variance and n.\n\n")
+
+# ---- Version 3: Equity / subgroup review --------------------------------------
+students_v2$Passed <- as.integer(students_v2$Math_Grade >= 70)
+equity_df <- aggregate(Passed ~ School + Race_Ethnicity,
+                        data = subset(students_v2, School %in% top3_schools & !is.na(Math_Grade)),
+                        FUN = mean)
+names(equity_df)[3] <- "Pass_Rate"
+
+print(
+  ggplot(equity_df, aes(x = School, y = Pass_Rate, fill = Race_Ethnicity)) +
+    geom_col(position = "dodge") +               # dodge, NOT fill -- see note below
+    scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+    labs(title = "Passing Rate (Math Grade >= 70) by Campus and Subgroup",
+         subtitle = "Equity view: are pass rates consistent across subgroups within each campus?",
+         y = "Share Passing") +
+    theme_minimal()
+)
+cat("EQUITY VERSION: reframes the same underlying data around subgroup PASS\n")
+cat("RATE rather than an overall mean -- the right chart changes because the\n")
+cat("QUESTION changes, even though the source data didn't.\n\n")
+cat("NOTE: this uses position='dodge', not 'fill' like Section 33's headcount\n")
+cat("chart. Headcounts are genuinely parts of a whole (they sum to a\n")
+cat("department total), so 100%-stacking them was correct. A pass RATE per\n")
+cat("subgroup is its own independent proportion -- it is NOT a share of some\n")
+cat("larger total, so stacking it to 100% would produce a number with no\n")
+cat("real meaning. Confusing 'a rate' with 'a share of a whole' is a common\n")
+cat("and easy mistake once you've gotten comfortable with 100%-stacked bars.\n")
+
+cat("\n", paste(rep("=", 78), collapse = ""), "\n", sep = "")
+cat("PART 4 COMPLETE.\n")

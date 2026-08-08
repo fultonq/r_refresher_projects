@@ -1,0 +1,94 @@
+---
+title: "School District Analysis -- split(), Weighted Index Ranking, ggplot2"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 2
+    number_sections: false
+---
+
+SCHOOL DISTRICT ANALYSIS: SPLIT(), WEIGHTED INDEX RANKING, & GGPLOT2  [REVISED]
+Change from original:
+  FIXED: print("\n--- ...") does not render a newline -- print() escapes
+  control characters inside the quoted string, so the console literally
+  shows the two characters \n rather than a blank line. Switched to cat().
+
+```{r setup, message=FALSE, warning=FALSE}
+library(ggplot2)
+```
+
+## Step 1: INITIALIZE THE COMPREHENSIVE DISTRICT DATASET
+
+```{r step-1}
+students_df <- data.frame(
+  Student_ID = paste0("STU-", 101:106),
+  Name       = c("Emma Smith", "Liam Jones", "Olivia Rice", "Noah Davis", "Ava Wilson", "Mia Taylor"),
+  School     = rep(c("Lincoln High", "Washington High"), each = 3),
+  Attendance = c(0.96, 0.82, 0.99, 0.74, 0.91, 0.88),
+  Math_Grade = c(88, 54, 95, 62, 71, NA),
+  stringsAsFactors = FALSE
+)
+```
+
+## Step 2: ONE-STEP DATA EXTRACTION VIA THE split() FUNCTION
+
+```{r step-2}
+school_tables_list <- split(students_df, students_df$School)
+
+print("--- INSIGHT: EXTRACTED 'LINCOLN HIGH' LIST NODE ---")
+print(school_tables_list[["Lincoln High"]])
+
+print("--- INSIGHT: EXTRACTED 'WASHINGTON HIGH' LIST NODE ---")
+print(school_tables_list[["Washington High"]])
+```
+
+## Step 3: CONSTRUCT A MULTI-FACTOR WEIGHTED INDEX CAMPUS RANKING
+
+```{r step-3}
+school_attendance <- aggregate(Attendance ~ School, data = students_df, FUN = mean)
+school_grades     <- aggregate(Math_Grade ~ School, data = students_df, FUN = mean, na.rm = TRUE)
+district_summary  <- merge(school_attendance, school_grades, by = "School")
+
+# Operational weight allocation: 60% Math Achievement, 40% Attendance Continuity
+weight_math       <- 0.60
+weight_attendance <- 0.40
+
+district_summary$Overall_Rank_Score <- (district_summary$Math_Grade * weight_math) +
+                                       ((district_summary$Attendance * 100) * weight_attendance)
+
+district_summary <- district_summary[order(-district_summary$Overall_Rank_Score), ]
+
+# FIXED: cat() renders "\n" as a real newline; print() would show it literally.
+cat("\n--- CAMPUS PERFORMANCE WEIGHTED INDEX LEDGER ---\n")
+print(district_summary)
+```
+
+## Step 4: VISUALIZE SUMMARY METRICS USING A GGPLOT2 BAR CHART LAYOUT
+
+```{r step-4}
+grade_summary_chart <- ggplot(district_summary, aes(x = School, y = Math_Grade, fill = School)) +
+  geom_bar(stat = "identity", color = "white", width = 0.5) +
+  geom_text(aes(label = sprintf("%.1f", Math_Grade)), vjust = -0.5, fontface = "bold", size = 4) +
+  scale_fill_manual(values = c("Lincoln High" = "steelblue", "Washington High" = "coral")) +
+  labs(title = "District Achievement Profile: Average Math Performance",
+       subtitle = "Campus-level academic tracking baseline comparisons (Excluding Incomplete NAs)",
+       x = "Campus Evaluation Facility",
+       y = "Mean Examination Score (%)") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 13),
+        legend.position = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15)))
+
+print(grade_summary_chart)
+```
+
+## Step 5: SAVE EXPORTS SECURELY TO DRIVE
+
+```{r step-5}
+write.csv(district_summary, file = "district_weighted_performance_audit.csv", row.names = FALSE)
+ggsave(filename = "district_math_grade_summary.png", plot = grade_summary_chart, width = 7, height = 5, dpi = 300)
+
+cat("------------------------------------------------------------------------\n")
+cat("Data architecture processing successful. File assets saved to:", getwd(), "\n")
+```
+
