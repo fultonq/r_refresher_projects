@@ -1,1 +1,1 @@
-# r_refresher_projects
+# R Programming Refresher projects
